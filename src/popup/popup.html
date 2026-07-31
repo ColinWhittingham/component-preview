@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Component Preview</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      width: 280px;
+      padding: 16px;
+      background: #0f0f0f;
+      color: #e8e8e8;
+    }
+    h1 { font-size: 14px; font-weight: 600; margin-bottom: 12px; color: #fff; }
+    button {
+      width: 100%;
+      padding: 10px 16px;
+      background: #2563eb;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    button:hover { background: #1d4ed8; }
+    button:disabled { background: #374151; color: #9ca3af; cursor: not-allowed; }
+    #status {
+      margin-top: 10px;
+      font-size: 12px;
+      color: #9ca3af;
+      min-height: 18px;
+    }
+    #status.error { color: #f87171; }
+    #status.success { color: #4ade80; }
+    #index-link {
+      display: none;
+      margin-top: 10px;
+      padding: 8px 12px;
+      background: #1e3a5f;
+      border-radius: 6px;
+      font-size: 12px;
+      color: #60a5fa;
+      text-decoration: none;
+      text-align: center;
+    }
+    #index-link:hover { background: #1e40af; color: #93c5fd; }
+  </style>
+</head>
+<body>
+  <h1>Component Preview</h1>
+  <button id="analyse-btn">Analyse Page</button>
+  <p id="status"></p>
+  <a id="index-link" target="_blank">View Components</a>
+  <script type="module" src="./popup.ts"></script>
+</body>
+</html>

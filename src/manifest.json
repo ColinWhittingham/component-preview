@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "Component Preview",
+  "version": "0.3.0",
+  "description": "Inferred Storybook for pages you don't own. Identifies UI components and exposes them via a browsable URL.",
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "Component Preview"
+  },
+  "background": {
+    "service_worker": "background/service-worker.js",
+    "type": "module"
+  },
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "tabs",
+    "clipboardWrite"
+  ],
+  "host_permissions": ["<all_urls>"],
+  "web_accessible_resources": [
+    {
+      "resources": ["components/*", "sdk/*"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}
