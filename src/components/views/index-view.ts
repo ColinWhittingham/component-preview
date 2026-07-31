@@ -186,8 +186,59 @@ export async function renderIndexView(root: HTMLElement, pageUrl: string | null)
         <h1 class="index-header__title">${pageHost}</h1>
         <span class="badge">${label}</span>
         <span class="badge badge--count">${components.length} component${components.length !== 1 ? 's' : ''}</span>
+        <button class="btn-export" id="copy-all-json" title="Copy all components as structured JSON — the full page catalogue for AI consumption">Copy All JSON</button>
       </div>
       <p class="index-header__url">${pageUrl}</p>
     </header>
-    ${gridHtml}`;
+    ${gridHtml}
+    <div class="toast" id="toast"></div>`;
+
+  // Copy All JSON handler
+  root.querySelector('#copy-all-json')?.addEventListener('click', async () => {
+    const allComponents = await Promise.all(
+      components.map(async (comp) => {
+        const snap = snapshotMap.get(comp.slug);
+        return {
+          slug: comp.slug,
+          name: comp.displayName,
+          framework: comp.frameworkName,
+          sourceType: comp.sourceType,
+          properties: comp.properties.map(p => ({
+            name: p.name,
+            type: p.type,
+            source: p.source,
+            defaultValue: p.defaultValue,
+            ...(p.values ? { values: p.values } : {}),
+          })),
+          html: snap?.cleanHtml || snap?.html || '',
+          css: snap?.matchedCss || snap?.css || '',
+          designTokens: snap?.designTokens || '',
+          fonts: snap?.fonts || [],
+        };
+      })
+    );
+
+    const json = JSON.stringify({
+      page: { url: pageUrl, title: pageRecord?.title ?? '', framework },
+      components: allComponents,
+      ...(hierarchy ? { hierarchy } : {}),
+    }, null, 2);
+
+    try {
+      await navigator.clipboard.writeText(json);
+      const toast = root.querySelector('#toast') as HTMLElement | null;
+      if (toast) {
+        toast.textContent = `${allComponents.length} components copied as JSON`;
+        toast.classList.add('toast--visible');
+        setTimeout(() => toast.classList.remove('toast--visible'), 2000);
+      }
+    } catch {
+      const toast = root.querySelector('#toast') as HTMLElement | null;
+      if (toast) {
+        toast.textContent = 'Clipboard access denied';
+        toast.classList.add('toast--visible');
+        setTimeout(() => toast.classList.remove('toast--visible'), 2000);
+      }
+    }
+  });
 }

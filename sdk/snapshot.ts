@@ -207,14 +207,17 @@ function cleanFormInputs(original: Element, clone: Element): void {
   });
 }
 
-// Post-process the HTML string to strip any residual value attributes
-// that survived DOM manipulation (browser serialization edge cases)
+// Post-process the HTML string to strip residual value attributes from
+// text-like inputs. Preserves value on submit/button inputs (it's their label).
 function stripInputValues(html: string): string {
   return html.replace(
-    /(<(?:input|textarea)\b[^>]*?)\s+value\s*=\s*"[^"]*"/gi,
-    '$1'
+    /(<input\b[^>]*?)\s+value\s*=\s*"[^"]*"/gi,
+    (_match, prefix: string) => {
+      if (/type\s*=\s*["']?(submit|button|hidden)/i.test(prefix)) return _match;
+      return prefix;
+    }
   ).replace(
-    /(<(?:input|textarea)\b[^>]*?)\s+value\s*=\s*'[^']*'/gi,
+    /(<textarea\b[^>]*?)\s+value\s*=\s*"[^"]*"/gi,
     '$1'
   );
 }

@@ -161,10 +161,22 @@ function applyPropsToIframe(iframe: HTMLIFrameElement, props: ComponentProperty[
       continue;
     }
 
-    // Generic data-attribute fallback
-    if (prop.name === 'theme' || prop.name === 'variant' || prop.name === 'mode') {
-      root.setAttribute(`data-${prop.name}`, overrideValue);
+    // Generic data-attribute fallback — set on root and any descendants
+    // that already have this attribute. Also try class-based switching.
+    const attrName = `data-${prop.name}`;
+    if (root.hasAttribute(attrName)) root.setAttribute(attrName, overrideValue);
+    root.querySelectorAll(`[${attrName}]`).forEach(el => {
+      el.setAttribute(attrName, overrideValue);
+    });
+    // Also try as a CSS class swap (for class-based theming)
+    if (prop.defaultValue && root.classList.contains(prop.defaultValue)) {
+      root.classList.remove(prop.defaultValue);
+      root.classList.add(overrideValue);
     }
+    root.querySelectorAll(`.${prop.defaultValue}`).forEach(el => {
+      el.classList.remove(prop.defaultValue);
+      el.classList.add(overrideValue);
+    });
   }
 }
 
@@ -321,7 +333,9 @@ export async function renderComponentView(
         ${componentRecord?.frameworkName ? `<span class="badge" title="Detected via ${componentRecord.sourceType} framework runtime">${componentRecord.frameworkName}</span>` : ''}
         <span class="badge" title="Component detected from ${componentRecord?.sourceType === 'framework' ? 'framework component tree' : 'HTML semantic structure and visual heuristics'}">${componentRecord?.sourceType ?? 'html'}</span>
         ${tierLabel ? `<span class="badge badge--hybrid" title="${tier === 'stylesheet' ? 'Preview uses original page stylesheets via <link> tags — most faithful rendering' : 'Preview uses matched CSS rules extracted from page stylesheets — hover states and media queries work'}">${tierLabel}</span>` : ''}
-        ${hasExportCss ? '<span class="badge" title="Matched CSS rules are available — Copy JSON will include real CSS selectors, not inline styles">export ready</span>' : ''}
+        ${hasExportCss
+          ? '<span class="badge" title="Matched CSS rules are available — Copy JSON will include real CSS selectors, not inline styles">export ready</span>'
+          : '<span class="badge badge--warn" title="CSS rules could not be extracted (cross-origin stylesheets blocked access). Export will contain inline computed styles instead of real CSS selectors.">limited CSS</span>'}
       </div>
       <div class="component-header__actions">
         <button class="btn-export" id="copy-json" title="Copy structured JSON to clipboard — includes component HTML, CSS, properties, and page hierarchy">Copy JSON</button>
