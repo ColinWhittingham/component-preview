@@ -198,9 +198,11 @@ export async function renderIndexView(root: HTMLElement, pageUrl: string | null)
     const allComponents = await Promise.all(
       components.map(async (comp) => {
         const snap = snapshotMap.get(comp.slug);
+        const encodedPage = encodeURIComponent(pageUrl!);
         return {
           slug: comp.slug,
           name: comp.displayName,
+          url: `${window.location.origin}/components/${comp.slug}/?page=${encodedPage}`,
           framework: comp.frameworkName,
           sourceType: comp.sourceType,
           properties: comp.properties.map(p => ({

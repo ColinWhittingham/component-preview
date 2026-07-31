@@ -15,6 +15,19 @@ import type {
 } from '../../shared/types';
 import { buildPreviewFrame, getActiveRenderingTier } from './preview-frame';
 
+// Find the deepest text node within an element, for setting text without
+// destroying inner element structure (e.g. <button><span>Submit</span></button>)
+function findDeepestTextNode(el: Element): Node | null {
+  for (const child of Array.from(el.childNodes)) {
+    if (child.nodeType === Node.TEXT_NODE && child.textContent?.trim()) return child;
+  }
+  for (const child of Array.from(el.children)) {
+    const found = findDeepestTextNode(child);
+    if (found) return found;
+  }
+  return null;
+}
+
 const PROP_SELECTORS: Record<string, { selector: string; apply: 'text' | 'src' | 'href' | 'alt' | 'attr' | 'placeholder' }> = {
   heading:      { selector: 'h1, h2, h3, h4, h5, h6', apply: 'text' },
   heading2:     { selector: 'h1 ~ h2, h2 ~ h3, h3 ~ h4, h2, h3, h4', apply: 'text' },
@@ -54,8 +67,14 @@ function applyPropsToHtml(html: string, props: ComponentProperty[], params: URLS
       if (el) {
         switch (mapping.apply) {
           case 'text':
-            if (el.tagName === 'INPUT') el.setAttribute('value', overrideValue);
-            else el.textContent = overrideValue;
+            if (el.tagName === 'INPUT') {
+              el.setAttribute('value', overrideValue);
+            } else {
+              // Find the deepest text node to preserve inner element structure
+              const textNode = findDeepestTextNode(el);
+              if (textNode) textNode.textContent = overrideValue;
+              else el.textContent = overrideValue;
+            }
             break;
           case 'src': el.setAttribute('src', overrideValue); break;
           case 'href': el.setAttribute('href', overrideValue); break;
@@ -71,21 +90,22 @@ function applyPropsToHtml(html: string, props: ComponentProperty[], params: URLS
       }
     }
 
-    // Theme/variant: set as data attribute on root — hybrid CSS rules will respond
-    if (prop.name === 'theme' || prop.name === 'variant') {
-      root.setAttribute(`data-${prop.name}`, overrideValue);
-      // Also try class-based theming
-      root.classList.forEach((cls) => {
-        if (cls.includes(`${prop.name}-`) || cls === prop.defaultValue) root.classList.remove(cls);
+    // Set data-* attribute on root and any descendants that have it
+    const attrName = `data-${prop.name}`;
+    if (root.hasAttribute(attrName)) root.setAttribute(attrName, overrideValue);
+    root.querySelectorAll(`[${attrName}]`).forEach(el => {
+      el.setAttribute(attrName, overrideValue);
+    });
+    // Also try class-based swapping
+    if (prop.defaultValue) {
+      if (root.classList.contains(prop.defaultValue)) {
+        root.classList.remove(prop.defaultValue);
+        root.classList.add(overrideValue);
+      }
+      root.querySelectorAll(`.${CSS.escape(prop.defaultValue)}`).forEach(el => {
+        el.classList.remove(prop.defaultValue);
+        el.classList.add(overrideValue);
       });
-      root.classList.add(overrideValue);
-      continue;
-    }
-
-    if (prop.source === 'attribute') {
-      const attrName = prop.name.replace(/([A-Z])/g, '-$1').toLowerCase();
-      const el = root.querySelector(`[${attrName}]`) ?? (root.hasAttribute(attrName) ? root : null);
-      if (el) el.setAttribute(attrName, overrideValue);
     }
   }
 
@@ -109,8 +129,14 @@ function applyPropsToIframe(iframe: HTMLIFrameElement, props: ComponentProperty[
       if (el) {
         switch (mapping.apply) {
           case 'text':
-            if (el.tagName === 'INPUT') el.setAttribute('value', overrideValue);
-            else el.textContent = overrideValue;
+            if (el.tagName === 'INPUT') {
+              el.setAttribute('value', overrideValue);
+            } else {
+              // Find the deepest text node to preserve inner element structure
+              const textNode = findDeepestTextNode(el);
+              if (textNode) textNode.textContent = overrideValue;
+              else el.textContent = overrideValue;
+            }
             break;
           case 'src': el.setAttribute('src', overrideValue); break;
           case 'href': el.setAttribute('href', overrideValue); break;
@@ -321,8 +347,21 @@ export async function renderComponentView(
     title: displayName,
   });
 
-  const tierLabel = tier === 'stylesheet' ? 'live CSS' : tier === 'hybrid' ? 'hybrid CSS' : '';
   const hasExportCss = snapshot.matchedCss.trim().length > 0;
+  const cssCoverage = snapshot.cssRuleCoverage ?? 0;
+  // Single rendering quality badge combining tier + export status
+  let qualityBadge: { label: string; cls: string; tip: string };
+  if (tier === 'stylesheet' && hasExportCss) {
+    qualityBadge = { label: 'live CSS', cls: 'badge--hybrid', tip: 'Preview uses original page stylesheets. CSS rules fully captured for export.' };
+  } else if (tier === 'stylesheet') {
+    qualityBadge = { label: 'live CSS (partial)', cls: 'badge--hybrid', tip: 'Preview uses original page stylesheets, but some CSS rules could not be extracted for export (cross-origin blocked).' };
+  } else if (tier === 'hybrid') {
+    qualityBadge = { label: 'hybrid CSS', cls: 'badge--hybrid', tip: `Preview uses ${Math.round(cssCoverage * 100)}% matched CSS rules. Hover states and media queries may work.` };
+  } else if (hasExportCss) {
+    qualityBadge = { label: 'inline + export', cls: '', tip: 'Preview uses inline computed styles for visual fidelity. CSS rules are available in JSON export.' };
+  } else {
+    qualityBadge = { label: 'inline only', cls: 'badge--warn', tip: 'Preview uses inline computed styles. CSS rules could not be extracted (cross-origin stylesheets blocked access).' };
+  }
   const propPanelHtml = buildPropPanel(props, params, slug, resolvedPageUrl);
 
   root.innerHTML = `
@@ -332,10 +371,7 @@ export async function renderComponentView(
         <h1 class="component-header__name">${displayName}</h1>
         ${componentRecord?.frameworkName ? `<span class="badge" title="Detected via ${componentRecord.sourceType} framework runtime">${componentRecord.frameworkName}</span>` : ''}
         <span class="badge" title="Component detected from ${componentRecord?.sourceType === 'framework' ? 'framework component tree' : 'HTML semantic structure and visual heuristics'}">${componentRecord?.sourceType ?? 'html'}</span>
-        ${tierLabel ? `<span class="badge badge--hybrid" title="${tier === 'stylesheet' ? 'Preview uses original page stylesheets via <link> tags — most faithful rendering' : 'Preview uses matched CSS rules extracted from page stylesheets — hover states and media queries work'}">${tierLabel}</span>` : ''}
-        ${hasExportCss
-          ? '<span class="badge" title="Matched CSS rules are available — Copy JSON will include real CSS selectors, not inline styles">export ready</span>'
-          : '<span class="badge badge--warn" title="CSS rules could not be extracted (cross-origin stylesheets blocked access). Export will contain inline computed styles instead of real CSS selectors.">limited CSS</span>'}
+        <span class="badge ${qualityBadge.cls}" title="${qualityBadge.tip}">${qualityBadge.label}</span>
       </div>
       <div class="component-header__actions">
         <button class="btn-export" id="copy-json" title="Copy structured JSON to clipboard — includes component HTML, CSS, properties, and page hierarchy">Copy JSON</button>
@@ -375,10 +411,12 @@ async function getExportJson(componentId: string, pageUrl: string): Promise<stri
     payload: null,
   });
 
+  const encodedPage = encodeURIComponent(exportable.sourceUrl);
   const json = {
     component: {
       slug: exportable.slug,
       name: exportable.displayName,
+      url: `${window.location.origin}/components/${exportable.slug}/?page=${encodedPage}`,
       framework: exportable.frameworkName,
       sourceType: exportable.sourceType,
       sourceUrl: exportable.sourceUrl,
@@ -425,25 +463,30 @@ function findNodeBySlug(node: HierarchyNode, slug: string): HierarchyNode | null
   return null;
 }
 
-function collectSubElements(node: HierarchyNode): HierarchyNode[] {
+function collectSubElements(node: HierarchyNode, maxItems = 12): HierarchyNode[] {
   const subs: HierarchyNode[] = [];
-  for (const child of node.children) {
-    // A child with its own component slug is a sibling component, not a sub-element
-    if (child.componentSlug) {
-      subs.push(child);
-      continue;
-    }
-    // Significant children: those with text, images, meaningful tags, or visual identity
-    const isSignificant = child.textContent || child.imageSrc ||
-      /^(h[1-6]|nav|form|img|button|a|video|picture|ul|ol|table)$/i.test(child.tag) ||
-      child.backgroundColor || (child.fontSize && parseFloat(child.fontSize) >= 18);
-    if (isSignificant) {
-      subs.push(child);
-    } else if (child.children.length > 0) {
-      // Recurse into wrapper nodes to find significant children deeper
-      subs.push(...collectSubElements(child));
+
+  function collect(parent: HierarchyNode) {
+    for (const child of parent.children) {
+      if (subs.length >= maxItems) return;
+      if (child.componentSlug) {
+        subs.push(child);
+        continue;
+      }
+      const isMeaningfulTag = /^(h[1-6]|nav|form|img|button|a|video|picture|ul|ol|table|p|input|select|textarea)$/i.test(child.tag);
+      const hasContent = !!(child.textContent || child.imageSrc);
+      const hasVisual = !!(child.backgroundColor || child.classes?.length);
+      const isLargeEnough = child.width > 40 && child.height > 20;
+
+      if ((isMeaningfulTag && (hasContent || isLargeEnough)) || (hasContent && isLargeEnough) || (hasVisual && isLargeEnough && child.height > 40)) {
+        subs.push(child);
+      } else if (child.children.length > 0) {
+        collect(child);
+      }
     }
   }
+
+  collect(node);
   return subs;
 }
 
