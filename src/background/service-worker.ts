@@ -11,8 +11,12 @@ import type {
   ExportableComponent,
   ComponentRecord,
   PageRecord,
+  PageHierarchy,
   ComponentSnapshot,
 } from '../shared/types';
+
+// Transient hierarchy cache (not persisted — too large for storage)
+let cachedHierarchy: { pageUrl: string; hierarchy: PageHierarchy } | null = null;
 import {
   savePageRecord,
   saveComponentRecord,
@@ -73,6 +77,8 @@ async function handleMessage(message: Message): Promise<unknown> {
       return findComponentBySlug((message.payload as FindComponentBySlugPayload).slug);
     case 'EXPORT_COMPONENT':
       return handleExportComponent(message.payload as ExportComponentPayload);
+    case 'GET_HIERARCHY':
+      return cachedHierarchy?.hierarchy ?? null;
     default:
       return null;
   }
@@ -81,6 +87,11 @@ async function handleMessage(message: Message): Promise<unknown> {
 async function handleAnalysePage(
   payload: AnalysePagePayload
 ): Promise<AnalysisCompleteResponse> {
+  // Cache hierarchy transiently for the component view
+  if (payload.hierarchy) {
+    cachedHierarchy = { pageUrl: payload.pageUrl, hierarchy: payload.hierarchy };
+  }
+
   const pageRecord: PageRecord = {
     url: payload.pageUrl,
     title: payload.pageTitle,

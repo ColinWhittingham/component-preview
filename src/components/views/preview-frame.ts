@@ -13,6 +13,24 @@ export function escapeForSrcdoc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
 }
 
+// Extract background styling from the outermost element of the inline-styled
+// snapshot HTML. The ancestor wrapper div has the component's visual context
+// (background-color, background-image) baked in as inline styles — we need
+// this on the iframe body so components with light text on dark backgrounds
+// render correctly in all tiers.
+function extractBodyBackground(inlineHtml: string): string {
+  const bgColorMatch = inlineHtml.match(/^<div[^>]+style="[^"]*?(background-color:[^;]+)/);
+  const bgImageMatch = inlineHtml.match(/^<div[^>]+style="[^"]*?(background-image:[^;]+)/);
+  const bgMatch = inlineHtml.match(/^<div[^>]+style="[^"]*?(background:[^;]+)/);
+  const parts: string[] = [];
+  if (bgMatch) parts.push(bgMatch[1]);
+  else {
+    if (bgColorMatch) parts.push(bgColorMatch[1]);
+    if (bgImageMatch) parts.push(bgImageMatch[1]);
+  }
+  return parts.join(';');
+}
+
 export function buildSnapshotFrame(
   html: string,
   css: string,
@@ -22,11 +40,8 @@ export function buildSnapshotFrame(
   const sandbox = opts.sandbox ?? 'allow-same-origin';
   const title = opts.title ?? 'Component preview';
 
-  // Extract background from the outermost element's inline style to set on body,
-  // preventing white-text-on-white-background when the component expects a dark parent
-  const bgMatch = html.match(/^<div[^>]+style="[^"]*?(background(?:-color)?:[^;]+)/);
-  const bodyBg = bgMatch ? bgMatch[1] + ';' : '';
-  const doc = `<!DOCTYPE html><html><head><style>*{box-sizing:border-box;}body{margin:0;overflow:${overflow};${bodyBg}}${css}</style></head><body>${html}</body></html>`;
+  const bodyBg = extractBodyBackground(html);
+  const doc = `<!DOCTYPE html><html><head><style>*{box-sizing:border-box;}body{margin:0;overflow:${overflow};${bodyBg ? bodyBg + ';' : ''}}${css}</style></head><body>${html}</body></html>`;
 
   return `<iframe class="${opts.className}" srcdoc="${escapeForSrcdoc(doc)}" sandbox="${sandbox}" title="${title}"></iframe>`;
 }
@@ -35,6 +50,7 @@ function buildStylesheetFrame(
   cleanHtml: string,
   stylesheetUrls: string[],
   designTokens: string,
+  bodyBg: string,
   opts: FrameOptions,
 ): string {
   const overflow = opts.overflow ?? 'auto';
@@ -46,19 +62,20 @@ function buildStylesheetFrame(
     .join('\n');
   const tokenStyle = designTokens ? `<style>${designTokens}</style>` : '';
 
-  const doc = `<!DOCTYPE html><html><head>${linkTags}${tokenStyle}<style>body{margin:0;overflow:${overflow};}</style></head><body>${cleanHtml}</body></html>`;
+  const doc = `<!DOCTYPE html><html><head>${linkTags}${tokenStyle}<style>body{margin:0;overflow:${overflow};${bodyBg ? bodyBg + ';' : ''}}</style></head><body>${cleanHtml}</body></html>`;
 
   return `<iframe class="${opts.className}" srcdoc="${escapeForSrcdoc(doc)}" sandbox="${sandbox}" title="${title}"></iframe>`;
 }
 
 function buildHybridFrame(
   snapshot: GetSnapshotResponse,
+  bodyBg: string,
   opts: FrameOptions,
 ): string {
   const overflow = opts.overflow ?? 'auto';
   const sections: string[] = [
     '*, *::before, *::after { box-sizing: border-box; }',
-    `body { margin: 0; overflow: ${overflow}; }`,
+    `body { margin: 0; overflow: ${overflow}; ${bodyBg ? bodyBg + ';' : ''} }`,
   ];
   if (snapshot.designTokens?.trim()) sections.push(snapshot.designTokens);
   if (snapshot.fonts?.length) sections.push(snapshot.fonts.join('\n'));
@@ -80,11 +97,14 @@ export function buildPreviewFrame(
   snapshot: GetSnapshotResponse,
   opts: FrameOptions,
 ): string {
+  // Extract background from the inline-styled snapshot (always has ancestor context)
+  const bodyBg = extractBodyBackground(snapshot.html);
+
   // Tier 1: Original stylesheets + clean HTML
   if (snapshot.stylesheetUrls && snapshot.stylesheetUrls.length > 0 &&
       snapshot.cleanHtml?.trim()) {
     return buildStylesheetFrame(snapshot.cleanHtml, snapshot.stylesheetUrls,
-      snapshot.designTokens ?? '', opts);
+      snapshot.designTokens ?? '', bodyBg, opts);
   }
 
   // Tier 2: Hybrid CSS (clean HTML + matched rules) when coverage is good
@@ -92,7 +112,7 @@ export function buildPreviewFrame(
   const hasMatchedCss = (snapshot.matchedCss ?? '').trim().length > 0;
   const hasCleanHtml = (snapshot.cleanHtml ?? '').trim().length > 0;
   if (coverage >= COVERAGE_THRESHOLD && hasMatchedCss && hasCleanHtml) {
-    return buildHybridFrame(snapshot, opts);
+    return buildHybridFrame(snapshot, bodyBg, opts);
   }
 
   // Tier 3: Inline-styled snapshot (always available)

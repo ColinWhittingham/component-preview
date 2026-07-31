@@ -1,6 +1,6 @@
 {
   "name": "component-preview",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Chrome extension: inferred Storybook for pages you don't own",
   "private": true,
   "type": "module",

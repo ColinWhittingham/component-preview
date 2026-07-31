@@ -116,6 +116,7 @@ export type MessageType =
   | 'GET_SNAPSHOT'
   | 'FIND_COMPONENT_BY_SLUG'
   | 'EXPORT_COMPONENT'
+  | 'GET_HIERARCHY'
   | 'ANALYSIS_COMPLETE';
 
 export interface AnalysePagePayload {

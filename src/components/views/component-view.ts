@@ -8,6 +8,8 @@ import type {
   FindComponentBySlugResponse,
   ExportComponentPayload,
   ExportableComponent,
+  HierarchyNode,
+  PageHierarchy,
   ComponentRecord,
   ComponentProperty,
 } from '../../shared/types';
@@ -318,6 +320,7 @@ export async function renderComponentView(
       </div>
       <div class="component-header__actions">
         <button class="btn-export" id="copy-ai" title="Copy self-contained HTML to clipboard for AI">Copy for AI</button>
+        <button class="btn-export" id="copy-json" title="Copy structured JSON to clipboard">Copy JSON</button>
         <button class="btn-export" id="export-html" title="Download as .html file">Export HTML</button>
       </div>
     </header>
@@ -325,10 +328,14 @@ export async function renderComponentView(
       <div class="component-canvas">${frameHtml}</div>
       ${propPanelHtml}
     </div>
+    <div id="sub-components"></div>
     <div class="toast" id="toast"></div>`;
 
   mountPropListeners(root, slug, resolvedPageUrl, props);
   mountExportListeners(root, componentId, resolvedPageUrl ?? '', displayName);
+
+  // Load hierarchy and render sub-components
+  loadAndRenderSubComponents(root, slug, resolvedPageUrl);
 }
 
 function showToast(root: HTMLElement, message: string): void {
@@ -348,6 +355,44 @@ async function getExportHtml(componentId: string, pageUrl: string): Promise<stri
   return buildExportHtml(exportable);
 }
 
+async function getExportJson(componentId: string, pageUrl: string): Promise<string | null> {
+  const exportable = await chrome.runtime.sendMessage<Message<ExportComponentPayload>, ExportableComponent | null>({
+    type: 'EXPORT_COMPONENT',
+    payload: { componentId, pageUrl },
+  });
+  if (!exportable) return null;
+
+  const hierarchy = await chrome.runtime.sendMessage<Message, PageHierarchy | null>({
+    type: 'GET_HIERARCHY',
+    payload: null,
+  });
+
+  const json = {
+    component: {
+      slug: exportable.slug,
+      name: exportable.displayName,
+      framework: exportable.frameworkName,
+      sourceType: exportable.sourceType,
+      sourceUrl: exportable.sourceUrl,
+      capturedAt: new Date(exportable.capturedAt).toISOString(),
+      properties: exportable.properties.map(p => ({
+        name: p.name,
+        type: p.type,
+        source: p.source,
+        defaultValue: p.defaultValue,
+        ...(p.values ? { values: p.values } : {}),
+      })),
+      html: exportable.cleanHtml,
+      css: exportable.matchedCss,
+      designTokens: exportable.designTokens,
+      fonts: exportable.fonts,
+    },
+    ...(hierarchy ? { hierarchy } : {}),
+  };
+
+  return JSON.stringify(json, null, 2);
+}
+
 function mountExportListeners(root: HTMLElement, componentId: string, pageUrl: string, displayName: string): void {
   root.querySelector('#copy-ai')?.addEventListener('click', async () => {
     const html = await getExportHtml(componentId, pageUrl);
@@ -355,6 +400,17 @@ function mountExportListeners(root: HTMLElement, componentId: string, pageUrl: s
     try {
       await navigator.clipboard.writeText(html);
       showToast(root, 'Copied to clipboard');
+    } catch {
+      showToast(root, 'Clipboard access denied');
+    }
+  });
+
+  root.querySelector('#copy-json')?.addEventListener('click', async () => {
+    const json = await getExportJson(componentId, pageUrl);
+    if (!json) { showToast(root, 'Export data not available'); return; }
+    try {
+      await navigator.clipboard.writeText(json);
+      showToast(root, 'JSON copied to clipboard');
     } catch {
       showToast(root, 'Clipboard access denied');
     }
@@ -371,5 +427,147 @@ function mountExportListeners(root: HTMLElement, componentId: string, pageUrl: s
     a.click();
     URL.revokeObjectURL(url);
     showToast(root, 'Downloaded');
+  });
+}
+
+// Find the hierarchy node for a given component slug, then extract its
+// significant children as "sub-components" for display.
+function findNodeBySlug(node: HierarchyNode, slug: string): HierarchyNode | null {
+  if (node.componentSlug === slug) return node;
+  for (const child of node.children) {
+    const found = findNodeBySlug(child, slug);
+    if (found) return found;
+  }
+  return null;
+}
+
+function collectSubElements(node: HierarchyNode): HierarchyNode[] {
+  const subs: HierarchyNode[] = [];
+  for (const child of node.children) {
+    // A child with its own component slug is a sibling component, not a sub-element
+    if (child.componentSlug) {
+      subs.push(child);
+      continue;
+    }
+    // Significant children: those with text, images, meaningful tags, or visual identity
+    const isSignificant = child.textContent || child.imageSrc ||
+      /^(h[1-6]|nav|form|img|button|a|video|picture|ul|ol|table)$/i.test(child.tag) ||
+      child.backgroundColor || (child.fontSize && parseFloat(child.fontSize) >= 18);
+    if (isSignificant) {
+      subs.push(child);
+    } else if (child.children.length > 0) {
+      // Recurse into wrapper nodes to find significant children deeper
+      subs.push(...collectSubElements(child));
+    }
+  }
+  return subs;
+}
+
+function buildCssSelector(node: HierarchyNode): string {
+  const parts: string[] = [node.tag];
+  if (node.id) return `#${node.id}`;
+  if (node.classes?.length) parts.push(`.${node.classes[0]}`);
+  return parts.join('');
+}
+
+function buildSubComponentCard(node: HierarchyNode, pageUrl: string | null): string {
+  const label = node.componentSlug
+    ? node.componentSlug.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
+    : describeNode(node);
+  const classes = node.classes?.slice(0, 3).join(', ') ?? '';
+  const preview = node.textContent
+    ? `<span class="sub-text">${node.textContent.slice(0, 80)}${node.textContent.length > 80 ? '…' : ''}</span>`
+    : node.imageSrc
+      ? `<img class="sub-img" src="${node.imageSrc}" alt="" loading="lazy" />`
+      : `<span class="sub-tag">&lt;${node.tag}&gt;</span>`;
+
+  const isLink = !!node.componentSlug;
+  const href = isLink && pageUrl
+    ? `${window.location.origin}/components/${node.componentSlug}/?page=${encodeURIComponent(pageUrl)}`
+    : '';
+
+  const selector = buildCssSelector(node);
+  const inner = `
+    <div class="sub-card__preview">${preview}</div>
+    <div class="sub-card__info">
+      <span class="sub-card__name">${label}</span>
+      ${classes ? `<span class="sub-card__classes">${classes}</span>` : ''}
+      <span class="sub-card__dims">${node.width}×${node.height}</span>
+    </div>`;
+
+  if (isLink) {
+    return `<a class="sub-card sub-card--link" href="${href}">${inner}</a>`;
+  }
+  return `<div class="sub-card sub-card--highlight" data-selector="${selector.replace(/"/g, '&quot;')}">${inner}</div>`;
+}
+
+function describeNode(node: HierarchyNode): string {
+  if (node.role) return node.role.charAt(0).toUpperCase() + node.role.slice(1);
+  const tag = node.tag.toUpperCase();
+  if (/^H[1-6]$/.test(tag)) return `Heading ${tag.slice(1)}`;
+  if (tag === 'IMG' || tag === 'PICTURE') return 'Image';
+  if (tag === 'NAV') return 'Navigation';
+  if (tag === 'FORM') return 'Form';
+  if (tag === 'BUTTON' || tag === 'A') return 'Button / Link';
+  if (tag === 'VIDEO') return 'Video';
+  if (tag === 'UL' || tag === 'OL') return 'List';
+  if (node.classes?.length) return node.classes[0].split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+  return tag.charAt(0) + tag.slice(1).toLowerCase();
+}
+
+async function loadAndRenderSubComponents(root: HTMLElement, slug: string, pageUrl: string | null): Promise<void> {
+  const container = root.querySelector('#sub-components');
+  if (!container) return;
+
+  const hierarchy = await chrome.runtime.sendMessage<Message, PageHierarchy | null>({
+    type: 'GET_HIERARCHY',
+    payload: null,
+  });
+
+  if (!hierarchy?.rootNode) return;
+
+  const componentNode = findNodeBySlug(hierarchy.rootNode, slug);
+  if (!componentNode) return;
+
+  const subElements = collectSubElements(componentNode);
+  if (subElements.length === 0) return;
+
+  const cards = subElements.map(n => buildSubComponentCard(n, pageUrl)).join('');
+  container.innerHTML = `
+    <div class="sub-components">
+      <h2 class="sub-components__title">Sub-elements (${subElements.length})</h2>
+      <div class="sub-components__grid">${cards}</div>
+    </div>`;
+
+  // Click-to-highlight: clicking a non-link sub-card outlines the matching
+  // element inside the preview iframe
+  container.querySelectorAll<HTMLElement>('.sub-card--highlight').forEach(card => {
+    card.addEventListener('click', () => {
+      const selector = card.dataset['selector'];
+      if (!selector) return;
+      const iframe = root.querySelector('.component-frame') as HTMLIFrameElement | null;
+      const iframeDoc = iframe?.contentDocument;
+      if (!iframeDoc) return;
+
+      // Remove any previous highlight
+      iframeDoc.querySelectorAll('[data-cp-highlight]').forEach(el => {
+        (el as HTMLElement).style.outline = '';
+        (el as HTMLElement).style.outlineOffset = '';
+        el.removeAttribute('data-cp-highlight');
+      });
+
+      // Highlight the matched element
+      const target = iframeDoc.querySelector(selector);
+      if (target) {
+        (target as HTMLElement).style.outline = '3px solid #2563eb';
+        (target as HTMLElement).style.outlineOffset = '2px';
+        target.setAttribute('data-cp-highlight', '1');
+        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+
+      // Toggle active state on the card
+      container.querySelectorAll('.sub-card--active').forEach(c => c.classList.remove('sub-card--active'));
+      card.classList.add('sub-card--active');
+    });
   });
 }

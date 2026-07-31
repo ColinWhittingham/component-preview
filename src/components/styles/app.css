@@ -75,6 +75,22 @@ code { font-family: var(--mono); background: var(--bg-3); padding: 2px 6px; bord
   padding: 24px;
 }
 
+/* ── Section groups ────────────────────────────────────────── */
+.section-group {
+  padding: 0 24px 16px;
+}
+.section-group__title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin: 20px 0 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 /* ── Card ──────────────────────────────────────────────────── */
 .card {
   display: flex;
@@ -263,6 +279,96 @@ code { font-family: var(--mono); background: var(--bg-3); padding: 2px 6px; bord
 .prop-row select:focus {
   outline: none;
   border-color: var(--accent);
+}
+
+/* ── Sub-components ────────────────────────────────────────── */
+.sub-components {
+  border-top: 1px solid var(--border);
+  padding: 16px 24px 24px;
+}
+.sub-components__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 12px;
+}
+.sub-components__grid {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.sub-card {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px;
+  min-width: 140px;
+  max-width: 220px;
+  gap: 6px;
+  transition: border-color 0.15s;
+}
+.sub-card--link {
+  cursor: pointer;
+  text-decoration: none;
+  color: inherit;
+}
+.sub-card--highlight { cursor: pointer; }
+.sub-card--highlight:hover, .sub-card--link:hover {
+  border-color: var(--accent);
+}
+.sub-card--active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.sub-card__preview {
+  overflow: hidden;
+  max-height: 60px;
+}
+.sub-text {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.sub-img {
+  max-width: 100%;
+  max-height: 60px;
+  object-fit: cover;
+  border-radius: 4px;
+}
+.sub-tag {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.sub-card__info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.sub-card__name {
+  font-size: 12px;
+  font-weight: 500;
+}
+.sub-card__classes {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sub-card__dims {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-muted);
 }
 
 /* ── Focus styles ──────────────────────────────────────────── */
