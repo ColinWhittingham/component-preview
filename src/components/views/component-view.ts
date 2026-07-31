@@ -14,7 +14,6 @@ import type {
   ComponentProperty,
 } from '../../shared/types';
 import { buildPreviewFrame, getActiveRenderingTier } from './preview-frame';
-import { buildExportHtml } from '../../../sdk/export-builder';
 
 const PROP_SELECTORS: Record<string, { selector: string; apply: 'text' | 'src' | 'href' | 'alt' | 'attr' | 'placeholder' }> = {
   heading:      { selector: 'h1, h2, h3, h4, h5, h6', apply: 'text' },
@@ -54,7 +53,10 @@ function applyPropsToHtml(html: string, props: ComponentProperty[], params: URLS
       const el = root.querySelector(mapping.selector);
       if (el) {
         switch (mapping.apply) {
-          case 'text': el.textContent = overrideValue; break;
+          case 'text':
+            if (el.tagName === 'INPUT') el.setAttribute('value', overrideValue);
+            else el.textContent = overrideValue;
+            break;
           case 'src': el.setAttribute('src', overrideValue); break;
           case 'href': el.setAttribute('href', overrideValue); break;
           case 'alt': el.setAttribute('alt', overrideValue); break;
@@ -106,7 +108,10 @@ function applyPropsToIframe(iframe: HTMLIFrameElement, props: ComponentProperty[
       const el = root.querySelector(mapping.selector);
       if (el) {
         switch (mapping.apply) {
-          case 'text': el.textContent = overrideValue; break;
+          case 'text':
+            if (el.tagName === 'INPUT') el.setAttribute('value', overrideValue);
+            else el.textContent = overrideValue;
+            break;
           case 'src': el.setAttribute('src', overrideValue); break;
           case 'href': el.setAttribute('href', overrideValue); break;
           case 'alt': el.setAttribute('alt', overrideValue); break;
@@ -313,15 +318,13 @@ export async function renderComponentView(
       <a href="${backUrl}" class="back-link">← Index</a>
       <div class="component-header__info">
         <h1 class="component-header__name">${displayName}</h1>
-        ${componentRecord?.frameworkName ? `<span class="badge">${componentRecord.frameworkName}</span>` : ''}
-        <span class="badge">${componentRecord?.sourceType ?? 'html'}</span>
-        ${tierLabel ? `<span class="badge badge--hybrid">${tierLabel}</span>` : ''}
-        ${hasExportCss ? '<span class="badge">export ready</span>' : ''}
+        ${componentRecord?.frameworkName ? `<span class="badge" title="Detected via ${componentRecord.sourceType} framework runtime">${componentRecord.frameworkName}</span>` : ''}
+        <span class="badge" title="Component detected from ${componentRecord?.sourceType === 'framework' ? 'framework component tree' : 'HTML semantic structure and visual heuristics'}">${componentRecord?.sourceType ?? 'html'}</span>
+        ${tierLabel ? `<span class="badge badge--hybrid" title="${tier === 'stylesheet' ? 'Preview uses original page stylesheets via <link> tags — most faithful rendering' : 'Preview uses matched CSS rules extracted from page stylesheets — hover states and media queries work'}">${tierLabel}</span>` : ''}
+        ${hasExportCss ? '<span class="badge" title="Matched CSS rules are available — Copy JSON will include real CSS selectors, not inline styles">export ready</span>' : ''}
       </div>
       <div class="component-header__actions">
-        <button class="btn-export" id="copy-ai" title="Copy self-contained HTML to clipboard for AI">Copy for AI</button>
-        <button class="btn-export" id="copy-json" title="Copy structured JSON to clipboard">Copy JSON</button>
-        <button class="btn-export" id="export-html" title="Download as .html file">Export HTML</button>
+        <button class="btn-export" id="copy-json" title="Copy structured JSON to clipboard — includes component HTML, CSS, properties, and page hierarchy">Copy JSON</button>
       </div>
     </header>
     <div class="component-layout">
@@ -344,15 +347,6 @@ function showToast(root: HTMLElement, message: string): void {
   toast.textContent = message;
   toast.classList.add('toast--visible');
   setTimeout(() => toast.classList.remove('toast--visible'), 2000);
-}
-
-async function getExportHtml(componentId: string, pageUrl: string): Promise<string | null> {
-  const exportable = await chrome.runtime.sendMessage<Message<ExportComponentPayload>, ExportableComponent | null>({
-    type: 'EXPORT_COMPONENT',
-    payload: { componentId, pageUrl },
-  });
-  if (!exportable) return null;
-  return buildExportHtml(exportable);
 }
 
 async function getExportJson(componentId: string, pageUrl: string): Promise<string | null> {
@@ -393,18 +387,7 @@ async function getExportJson(componentId: string, pageUrl: string): Promise<stri
   return JSON.stringify(json, null, 2);
 }
 
-function mountExportListeners(root: HTMLElement, componentId: string, pageUrl: string, displayName: string): void {
-  root.querySelector('#copy-ai')?.addEventListener('click', async () => {
-    const html = await getExportHtml(componentId, pageUrl);
-    if (!html) { showToast(root, 'Export data not available'); return; }
-    try {
-      await navigator.clipboard.writeText(html);
-      showToast(root, 'Copied to clipboard');
-    } catch {
-      showToast(root, 'Clipboard access denied');
-    }
-  });
-
+function mountExportListeners(root: HTMLElement, componentId: string, pageUrl: string, _displayName: string): void {
   root.querySelector('#copy-json')?.addEventListener('click', async () => {
     const json = await getExportJson(componentId, pageUrl);
     if (!json) { showToast(root, 'Export data not available'); return; }
@@ -414,19 +397,6 @@ function mountExportListeners(root: HTMLElement, componentId: string, pageUrl: s
     } catch {
       showToast(root, 'Clipboard access denied');
     }
-  });
-
-  root.querySelector('#export-html')?.addEventListener('click', async () => {
-    const html = await getExportHtml(componentId, pageUrl);
-    if (!html) { showToast(root, 'Export data not available'); return; }
-    const blob = new Blob([html], { type: 'text/html' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${displayName.toLowerCase().replace(/\s+/g, '-')}.html`;
-    a.click();
-    URL.revokeObjectURL(url);
-    showToast(root, 'Downloaded');
   });
 }
 

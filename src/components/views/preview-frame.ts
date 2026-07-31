@@ -13,22 +13,38 @@ export function escapeForSrcdoc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
 }
 
-// Extract background styling from the outermost element of the inline-styled
-// snapshot HTML. The ancestor wrapper div has the component's visual context
-// (background-color, background-image) baked in as inline styles — we need
-// this on the iframe body so components with light text on dark backgrounds
-// render correctly in all tiers.
+// Extract background from inline-styled snapshot HTML. Searches the first
+// few elements (outer wrapper + component root) for any background styling.
+// Returns the first non-transparent background found.
 function extractBodyBackground(inlineHtml: string): string {
-  const bgColorMatch = inlineHtml.match(/^<div[^>]+style="[^"]*?(background-color:[^;]+)/);
-  const bgImageMatch = inlineHtml.match(/^<div[^>]+style="[^"]*?(background-image:[^;]+)/);
-  const bgMatch = inlineHtml.match(/^<div[^>]+style="[^"]*?(background:[^;]+)/);
-  const parts: string[] = [];
-  if (bgMatch) parts.push(bgMatch[1]);
-  else {
-    if (bgColorMatch) parts.push(bgColorMatch[1]);
-    if (bgImageMatch) parts.push(bgImageMatch[1]);
+  // Match all style attributes in the first 2000 chars (covers wrapper + root)
+  const styleRegex = /style="([^"]+)"/g;
+  const searchRegion = inlineHtml.slice(0, 2000);
+  let match: RegExpExecArray | null;
+  while ((match = styleRegex.exec(searchRegion)) !== null) {
+    const style = match[1];
+    // Skip transparent/default backgrounds
+    const bgColorVal = style.match(/background-color:\s*([^;]+)/);
+    if (bgColorVal && bgColorVal[1].trim() !== 'rgba(0, 0, 0, 0)' && bgColorVal[1].trim() !== 'transparent') {
+      const parts: string[] = [`background-color:${bgColorVal[1]}`];
+      const bgImage = style.match(/background-image:\s*([^;]+)/);
+      if (bgImage) parts.push(`background-image:${bgImage[1]}`);
+      const bgSize = style.match(/background-size:\s*([^;]+)/);
+      if (bgSize) parts.push(`background-size:${bgSize[1]}`);
+      const bgPos = style.match(/background-position:\s*([^;]+)/);
+      if (bgPos) parts.push(`background-position:${bgPos[1]}`);
+      return parts.join(';');
+    }
+    const bgShorthand = style.match(/background:\s*([^;]+)/);
+    if (bgShorthand && !bgShorthand[1].includes('transparent') && !bgShorthand[1].includes('rgba(0, 0, 0, 0)')) {
+      return `background:${bgShorthand[1]}`;
+    }
+    const bgImageOnly = style.match(/background-image:\s*(url\([^)]+\)[^;]*)/);
+    if (bgImageOnly) {
+      return `background-image:${bgImageOnly[1]}`;
+    }
   }
-  return parts.join(';');
+  return '';
 }
 
 export function buildSnapshotFrame(
