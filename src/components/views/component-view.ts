@@ -112,100 +112,6 @@ function applyPropsToHtml(html: string, props: ComponentProperty[], params: URLS
   return doc.body.innerHTML;
 }
 
-// Apply prop overrides to the live iframe DOM (for instant feedback without reload)
-function applyPropsToIframe(iframe: HTMLIFrameElement, props: ComponentProperty[], params: URLSearchParams): void {
-  const iframeDoc = iframe.contentDocument;
-  if (!iframeDoc) return;
-  const root = iframeDoc.body.firstElementChild;
-  if (!root) return;
-
-  for (const prop of props) {
-    const overrideValue = params.get(prop.name);
-    if (overrideValue === null) continue;
-
-    const mapping = PROP_SELECTORS[prop.name];
-    if (mapping) {
-      const el = root.querySelector(mapping.selector);
-      if (el) {
-        switch (mapping.apply) {
-          case 'text':
-            if (el.tagName === 'INPUT') {
-              el.setAttribute('value', overrideValue);
-            } else {
-              // Find the deepest text node to preserve inner element structure
-              const textNode = findDeepestTextNode(el);
-              if (textNode) textNode.textContent = overrideValue;
-              else el.textContent = overrideValue;
-            }
-            break;
-          case 'src': el.setAttribute('src', overrideValue); break;
-          case 'href': el.setAttribute('href', overrideValue); break;
-          case 'alt': el.setAttribute('alt', overrideValue); break;
-          case 'placeholder': el.setAttribute('placeholder', overrideValue); break;
-          case 'attr': {
-            const attrName = prop.name === 'ariaLabel' ? 'aria-label' : prop.name;
-            el.setAttribute(attrName, overrideValue);
-            break;
-          }
-        }
-        continue;
-      }
-    }
-
-    // CSS-attribute sourced properties: set data-* attribute
-    if (prop.source === 'css-attribute') {
-      root.setAttribute(`data-${prop.name}`, overrideValue);
-      // Also walk descendant elements that might have the same attribute
-      root.querySelectorAll(`[data-${prop.name}]`).forEach(el => {
-        el.setAttribute(`data-${prop.name}`, overrideValue);
-      });
-      continue;
-    }
-
-    // CSS-class sourced properties: toggle BEM modifier classes
-    if (prop.source === 'css-class') {
-      if (prop.values) {
-        // Remove all variant classes, add the new one
-        for (const val of prop.values) {
-          // Try BEM pattern: block--modifier
-          root.classList.forEach(cls => {
-            if (cls.endsWith(`--${val}`)) root.classList.remove(cls);
-          });
-          // Try state pattern: is-state / has-state
-          root.classList.remove(`is-${val}`, `has-${val}`);
-        }
-        // Add new variant
-        if (prop.type === 'boolean') {
-          if (overrideValue === 'true') root.classList.add(`is-${prop.name.replace(/^is/, '').replace(/^[A-Z]/, c => c.toLowerCase())}`);
-        } else {
-          // Find the BEM block prefix from current classes
-          const blockPrefix = Array.from(root.classList).find(c => prop.values!.some(v => c.endsWith(`--${v}`)))?.replace(/--[^-]+$/, '');
-          if (blockPrefix) root.classList.add(`${blockPrefix}--${overrideValue}`);
-          else root.classList.add(overrideValue);
-        }
-      }
-      continue;
-    }
-
-    // Generic data-attribute fallback — set on root and any descendants
-    // that already have this attribute. Also try class-based switching.
-    const attrName = `data-${prop.name}`;
-    if (root.hasAttribute(attrName)) root.setAttribute(attrName, overrideValue);
-    root.querySelectorAll(`[${attrName}]`).forEach(el => {
-      el.setAttribute(attrName, overrideValue);
-    });
-    // Also try as a CSS class swap (for class-based theming)
-    if (prop.defaultValue && root.classList.contains(prop.defaultValue)) {
-      root.classList.remove(prop.defaultValue);
-      root.classList.add(overrideValue);
-    }
-    root.querySelectorAll(`.${prop.defaultValue}`).forEach(el => {
-      el.classList.remove(prop.defaultValue);
-      el.classList.add(overrideValue);
-    });
-  }
-}
-
 function buildPropPanel(props: ComponentProperty[], params: URLSearchParams, slug: string, pageUrl: string | null): string {
   if (props.length === 0) {
     return '<div class="prop-panel"><p class="prop-panel__empty">No configurable properties detected.</p></div>';
@@ -247,26 +153,41 @@ function buildPropPanel(props: ComponentProperty[], params: URLSearchParams, slu
   </aside>`;
 }
 
-// Mount prop panel listeners that update both the URL and the iframe content live
+// Mount prop panel listeners that rebuild the preview iframe on every change.
+// This is more reliable than trying to modify the live iframe DOM (which fails
+// across tier boundaries, sandbox states, and async stylesheet loading).
 function mountPropListeners(
   root: HTMLElement,
   slug: string,
   pageUrl: string | null,
   props: ComponentProperty[],
+  snapshot: GetSnapshotResponse,
+  displayName: string,
 ): void {
+  const tier = getActiveRenderingTier(snapshot);
+
   root.querySelectorAll<HTMLInputElement | HTMLSelectElement>('[data-prop]').forEach((input) => {
     const handler = () => {
-      // Update URL for shareability
       const params = new URLSearchParams(window.location.search);
       params.set(input.dataset['prop']!, input.value);
       if (pageUrl && !params.has('page')) params.set('page', pageUrl);
       const newUrl = `${window.location.origin}/components/${slug}/?${params.toString()}`;
       history.replaceState(null, '', newUrl);
 
-      // Update iframe content live (no page reload)
-      const iframe = root.querySelector('.component-frame') as HTMLIFrameElement | null;
-      if (iframe) {
-        applyPropsToIframe(iframe, props, params);
+      // Rebuild the entire iframe with props applied to the HTML string
+      const htmlToModify = tier === 'inline' ? snapshot.html : (snapshot.cleanHtml || snapshot.html);
+      const modifiedHtml = applyPropsToHtml(htmlToModify, props, params);
+      const modifiedSnapshot: GetSnapshotResponse = tier === 'inline'
+        ? { ...snapshot, html: modifiedHtml }
+        : { ...snapshot, cleanHtml: modifiedHtml };
+
+      const canvas = root.querySelector('.component-canvas');
+      if (canvas) {
+        canvas.innerHTML = buildPreviewFrame(modifiedSnapshot, {
+          className: 'component-frame',
+          overflow: 'auto',
+          title: displayName,
+        });
       }
     };
     input.addEventListener('input', handler);
@@ -384,7 +305,7 @@ export async function renderComponentView(
     <div id="sub-components"></div>
     <div class="toast" id="toast"></div>`;
 
-  mountPropListeners(root, slug, resolvedPageUrl, props);
+  mountPropListeners(root, slug, resolvedPageUrl, props, snapshot, displayName);
   mountExportListeners(root, componentId, resolvedPageUrl ?? '', displayName);
 
   // Load hierarchy and render sub-components

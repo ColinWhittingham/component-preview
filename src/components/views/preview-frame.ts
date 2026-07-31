@@ -53,7 +53,7 @@ export function buildSnapshotFrame(
   opts: FrameOptions,
 ): string {
   const overflow = opts.overflow ?? 'auto';
-  const sandbox = opts.sandbox ?? 'allow-same-origin';
+  const sandbox = opts.sandbox ?? 'allow-same-origin allow-scripts';
   const title = opts.title ?? 'Component preview';
 
   const bodyBg = extractBodyBackground(html);
@@ -70,7 +70,7 @@ function buildStylesheetFrame(
   opts: FrameOptions,
 ): string {
   const overflow = opts.overflow ?? 'auto';
-  const sandbox = opts.sandbox ?? 'allow-same-origin';
+  const sandbox = opts.sandbox ?? 'allow-same-origin allow-scripts';
   const title = opts.title ?? 'Component preview';
 
   const linkTags = stylesheetUrls
@@ -98,7 +98,7 @@ function buildHybridFrame(
   sections.push(snapshot.matchedCss);
   const css = sections.join('\n');
 
-  const sandbox = opts.sandbox ?? 'allow-same-origin';
+  const sandbox = opts.sandbox ?? 'allow-same-origin allow-scripts';
   const title = opts.title ?? 'Component preview';
   const doc = `<!DOCTYPE html><html><head><style>${css}</style></head><body>${snapshot.cleanHtml}</body></html>`;
 

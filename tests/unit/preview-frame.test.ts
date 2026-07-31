@@ -56,7 +56,7 @@ describe('buildSnapshotFrame', () => {
 
   it('includes sandbox attribute', () => {
     const result = buildSnapshotFrame('<div></div>', '', { className: 'f' });
-    expect(result).toContain('sandbox="allow-same-origin"');
+    expect(result).toContain('sandbox="allow-same-origin allow-scripts"');
   });
 
   it('respects overflow option', () => {

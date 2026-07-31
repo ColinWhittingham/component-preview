@@ -66,8 +66,17 @@ function resolveResources(root: Element, baseURI: string): void {
   root.querySelectorAll('a[href]').forEach(a => {
     a.setAttribute('href', resolveUrl(a.getAttribute('href')!, baseURI));
   });
-  root.querySelectorAll('video[poster]').forEach(v => {
-    v.setAttribute('poster', resolveUrl(v.getAttribute('poster')!, baseURI));
+  root.querySelectorAll('video').forEach(v => {
+    if (v.getAttribute('poster')) v.setAttribute('poster', resolveUrl(v.getAttribute('poster')!, baseURI));
+    if (v.getAttribute('src')) v.setAttribute('src', resolveUrl(v.getAttribute('src')!, baseURI));
+    v.setAttribute('autoplay', '');
+    v.setAttribute('muted', '');
+    v.setAttribute('loop', '');
+    v.setAttribute('playsinline', '');
+    v.removeAttribute('loading');
+    v.querySelectorAll('source').forEach(source => {
+      if (source.getAttribute('src')) source.setAttribute('src', resolveUrl(source.getAttribute('src')!, baseURI));
+    });
   });
 }
 
